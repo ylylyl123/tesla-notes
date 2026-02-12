@@ -21,6 +21,7 @@ import { MemoList } from "./components/MemoList/MemoList";
 import { MemoEditor } from "./components/Editor/MemoEditor";
 import ThemeToggle from "./components/Common/ThemeToggle";
 import { cn } from "./lib/cn";
+import { isCloudConfigured, subscribeCloudChanges } from "./services/cloudClient";
 import {
   getCurrentDataMode,
   getDataClient,
@@ -227,21 +228,34 @@ function App() {
     loadPlans(selectedDate.format("YYYY-MM-DD"));
   }, [selectedDate]);
 
-  // 自动刷新: 支持手机新增后电脑端自动看到
+  // 自动刷新: 本地模式轮询 + 聚焦刷新
   useEffect(() => {
     const refresh = () => {
       loadMemos();
       loadPlans(selectedDate.format("YYYY-MM-DD"));
     };
 
-    const timer = window.setInterval(refresh, 15000);
+    const shouldPoll = dataMode !== "cloud";
+    const timer = shouldPoll ? window.setInterval(refresh, 15000) : null;
     window.addEventListener("focus", refresh);
 
     return () => {
-      window.clearInterval(timer);
+      if (timer) window.clearInterval(timer);
       window.removeEventListener("focus", refresh);
     };
-  }, [selectedDate]);
+  }, [selectedDate, dataMode]);
+
+  // 云端模式: 使用 Supabase Realtime, 新增/编辑几乎实时同步
+  useEffect(() => {
+    if (dataMode !== "cloud" || !isCloudConfigured()) return;
+
+    const unsubscribe = subscribeCloudChanges(() => {
+      loadMemos();
+      loadPlans(selectedDate.format("YYYY-MM-DD"));
+    });
+
+    return () => unsubscribe();
+  }, [selectedDate, dataMode]);
 
   const switchDataMode = (mode: DataMode) => {
     setPreferredDataMode(mode);
@@ -371,6 +385,8 @@ function App() {
                       key={i}
                       src={match[1]}
                       alt="附图"
+                      loading="lazy"
+                      decoding="async"
                       className={`rounded-lg my-2 transition-all ${compactMode
                         ? "max-w-[200px] max-h-[150px] object-cover cursor-pointer hover:scale-105"
                         : "max-w-full"
@@ -582,7 +598,7 @@ function App() {
             </button>
           </div>
           <p className="text-xs text-gray-500">
-            选择云同步后, 手机与电脑会通过 Supabase 同步; 应用会每 15 秒自动刷新一次。
+            云同步模式下启用实时同步（手机新增通常秒级出现）；本地模式保留 15 秒自动刷新。
           </p>
         </div>
         <div className="flex items-center justify-between">

@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type RealtimeChannel, type SupabaseClient } from "@supabase/supabase-js";
 import type {
   CreateMemoInput,
   DailyPlan,
@@ -21,6 +21,33 @@ function getSupabaseClient(): SupabaseClient {
 
   supabase = createClient(url, anonKey);
   return supabase;
+}
+
+export function isCloudConfigured(): boolean {
+  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+  return Boolean(url && anonKey);
+}
+
+export function subscribeCloudChanges(onChange: () => void): () => void {
+  const client = getSupabaseClient();
+  const channel: RealtimeChannel = client
+    .channel(`notes-realtime-${Date.now()}`)
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "memo" },
+      () => onChange()
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "daily_plan" },
+      () => onChange()
+    )
+    .subscribe();
+
+  return () => {
+    void client.removeChannel(channel);
+  };
 }
 
 function nowTs(): number {

@@ -128,6 +128,8 @@ export function MemoCard({
                     key={i}
                     src={match[1]}
                     alt="附图"
+                    loading="lazy"
+                    decoding="async"
                     className="max-w-full rounded-xl my-3 shadow-md border border-slate-100 dark:border-slate-700"
                   />
                 );
