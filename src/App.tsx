@@ -116,8 +116,14 @@ function App() {
     try {
       const result = await getDataClient().getMemos({ limit: 100, offset: 0 });
       setMemos(result);
-      // 缓存到 localStorage，下次打开页面瞬间可见
-      try { localStorage.setItem("tesla_memos_cache", JSON.stringify(result)); } catch { /* 忽略溢出 */ }
+      // 缓存到 localStorage（剥离 base64 图片，避免超出 5MB 限制）
+      try {
+        const lite = result.map((m) => ({
+          ...m,
+          content: m.content.replace(/data:image\/[^)]+/g, "data:image/placeholder"),
+        }));
+        localStorage.setItem("tesla_memos_cache", JSON.stringify(lite));
+      } catch { /* 忽略溢出 */ }
     } catch (error) {
       console.error("加载笔记失败:", error);
     }
