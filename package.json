@@ -1,0 +1,45 @@
+{
+  "name": "tesla-notes",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:host": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "migrate:cloud:dry": "node scripts/migrate-sqlite-to-supabase.cjs --dry-run",
+    "migrate:cloud": "node scripts/migrate-sqlite-to-supabase.cjs",
+    "migrate:export": "node scripts/migrate-sqlite-to-supabase.cjs --export-only"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.90.1",
+    "@tanstack/react-query": "^5.90.17",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "dayjs": "^1.11.19",
+    "lucide-react": "^0.562.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.12.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "autoprefixer": "^10.4.23",
+    "better-sqlite3": "^12.6.0",
+    "dotenv": "^17.2.3",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}
