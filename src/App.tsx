@@ -74,7 +74,13 @@ type ViewMode = "day" | "week" | "month" | "year";
 type Tab = "home" | "stats" | "archive" | "settings";
 
 function App() {
-  const [memos, setMemos] = useState<Memo[]>([]);
+  // 从 localStorage 缓存中立即加载笔记（打开页面瞬间可见）
+  const [memos, setMemos] = useState<Memo[]>(() => {
+    try {
+      const cached = localStorage.getItem("tesla_memos_cache");
+      return cached ? JSON.parse(cached) : [];
+    } catch { return []; }
+  });
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_plans, setPlans] = useState<DailyPlan[]>([]);
   const [newMemoContent, setNewMemoContent] = useState("");
@@ -105,11 +111,13 @@ function App() {
     }
   }, [selectedDate]);
 
-  // 加载笔记
+  // 加载笔记（同时更新 localStorage 缓存）
   const loadMemos = async () => {
     try {
       const result = await getDataClient().getMemos({ limit: 100, offset: 0 });
       setMemos(result);
+      // 缓存到 localStorage，下次打开页面瞬间可见
+      try { localStorage.setItem("tesla_memos_cache", JSON.stringify(result)); } catch { /* 忽略溢出 */ }
     } catch (error) {
       console.error("加载笔记失败:", error);
     }
