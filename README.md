@@ -46,6 +46,17 @@ pnpm dev --host
 - `VITE_SUPABASE_URL=...`
 - `VITE_SUPABASE_ANON_KEY=...`
 
+## 2026-02-13 里程碑
+
+- 已完成 Supabase 迁移（`memo=95`）
+- 已完成 GitHub Pages 公网部署
+- 已完成手机端 UI 适配与云端实时同步优化
+- 云模式首开约 10 秒加载，后续增删改查低延迟
+
+详细记录：
+- `docs/2026-02-13-部署与性能优化记录.md`
+- `docs/项目总结.md`
+
 ## 构建
 ```bash
 pnpm build
