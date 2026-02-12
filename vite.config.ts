@@ -3,11 +3,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+const isGitHubPages = process.env.GITHUB_PAGES === 'true';
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
+  // GitHub Pages 部署时需要设置 base 路径
+  base: isGitHubPages ? '/tesla-notes/' : '/',
   plugins: [react(), tailwindcss()],
 
   // Path aliases
