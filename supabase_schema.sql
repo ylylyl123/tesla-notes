@@ -44,3 +44,7 @@ for all
 to anon
 using (true)
 with check (true);
+
+-- 索引: 加速 getMemos 查询 (WHERE archived=false ORDER BY pinned DESC, created_ts DESC)
+create index if not exists idx_memo_list
+  on public.memo (archived, pinned desc, created_ts desc);

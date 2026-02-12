@@ -19,7 +19,19 @@ function getSupabaseClient(): SupabaseClient {
     throw new Error("缺少 Supabase 配置: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
   }
 
-  supabase = createClient(url, anonKey);
+  supabase = createClient(url, anonKey, {
+    realtime: {
+      params: { eventsPerSecond: 10 },
+    },
+    global: {
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        return fetch(input, { ...init, signal: controller.signal })
+          .finally(() => clearTimeout(timeout));
+      },
+    },
+  });
   return supabase;
 }
 

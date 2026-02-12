@@ -125,60 +125,107 @@ function App() {
     }
   };
 
-  // 创建笔记
+  // 创建笔记（乐观更新）
   const createMemo = async () => {
     if (!newMemoContent.trim()) return;
+    const tempId = -Date.now();
+    const ts = Math.floor(Date.now() / 1000);
+    const tempMemo: Memo = {
+      id: tempId,
+      uid: "",
+      created_ts: ts,
+      updated_ts: ts,
+      category: selectedCategory,
+      target_date: selectedDate.format("YYYY-MM-DD"),
+      completion_status: "pending",
+      content: newMemoContent,
+      pinned: false,
+      archived: false,
+    };
+    // 立即更新 UI
+    setMemos((prev) => [tempMemo, ...prev]);
+    setNewMemoContent("");
     try {
-      await getDataClient().createMemo({
-        content: newMemoContent,
+      const created = await getDataClient().createMemo({
+        content: tempMemo.content,
         category: selectedCategory,
         targetDate: selectedDate.format("YYYY-MM-DD"),
       });
-      setNewMemoContent("");
-      loadMemos();
+      // 用真实数据替换临时数据
+      setMemos((prev) => prev.map((m) => (m.id === tempId ? created : m)));
     } catch (error) {
+      // 失败回滚
+      setMemos((prev) => prev.filter((m) => m.id !== tempId));
       console.error("创建笔记失败:", error);
     }
   };
 
-  // 删除笔记
+  // 删除笔记（乐观更新）
   const deleteMemo = async (id: number) => {
+    const backup = memos;
+    // 立即从 UI 中移除
+    setMemos((prev) => prev.filter((m) => m.id !== id));
     try {
       await getDataClient().deleteMemo(id);
-      loadMemos();
     } catch (error) {
+      // 失败回滚
+      setMemos(backup);
       console.error("删除失败:", error);
       alert("删除失败: " + error);
     }
   };
 
-  // 更新笔记
+  // 更新笔记（乐观更新）
   const updateMemo = async (id: number) => {
+    const backup = memos;
+    // 立即更新 UI
+    setMemos((prev) =>
+      prev.map((m) =>
+        m.id === id ? { ...m, content: editContent, updated_ts: Math.floor(Date.now() / 1000) } : m
+      )
+    );
+    setEditingMemoId(null);
     try {
       await getDataClient().updateMemo({ id, content: editContent });
-      setEditingMemoId(null);
-      loadMemos();
     } catch (error) {
+      // 失败回滚
+      setMemos(backup);
       console.error("更新失败:", error);
     }
   };
 
-  // 切换完成状态
+  // 切换完成状态（乐观更新）
   const toggleStatus = async (id: number) => {
+    const backup = memos;
+    const nextStatus = (s: string) =>
+      s === "pending" ? "completed" : s === "completed" ? "incomplete" : "pending";
+    // 立即切换 UI
+    setMemos((prev) =>
+      prev.map((m) =>
+        m.id === id ? { ...m, completion_status: nextStatus(m.completion_status) } : m
+      )
+    );
     try {
       await getDataClient().toggleMemoStatus(id);
-      loadMemos();
     } catch (error) {
+      setMemos(backup);
       console.error("切换状态失败:", error);
     }
   };
 
-  // 切换置顶状态
+  // 切换置顶状态（乐观更新）
   const togglePin = async (id: number, currentPinned: boolean) => {
+    const backup = memos;
+    // 立即切换 UI
+    setMemos((prev) =>
+      prev.map((m) =>
+        m.id === id ? { ...m, pinned: !currentPinned } : m
+      )
+    );
     try {
       await getDataClient().updateMemo({ id, pinned: !currentPinned });
-      loadMemos();
     } catch (error) {
+      setMemos(backup);
       console.error("切换置顶失败:", error);
     }
   };
@@ -268,11 +315,11 @@ function App() {
     icon: typeof Home;
     label: string;
   }> = [
-    { id: "home", icon: Home, label: "首页" },
-    { id: "stats", icon: BarChart2, label: "统计" },
-    { id: "archive", icon: Bookmark, label: "置顶" },
-    { id: "settings", icon: SettingsIcon, label: "设置" },
-  ];
+      { id: "home", icon: Home, label: "首页" },
+      { id: "stats", icon: BarChart2, label: "统计" },
+      { id: "archive", icon: Bookmark, label: "置顶" },
+      { id: "settings", icon: SettingsIcon, label: "设置" },
+    ];
 
   // 根据视图模式过滤笔记
   const getFilteredMemos = () => {
