@@ -21,6 +21,7 @@ import { MemoList } from "./components/MemoList/MemoList";
 import { MemoEditor } from "./components/Editor/MemoEditor";
 import ThemeToggle from "./components/Common/ThemeToggle";
 import { cn } from "./lib/cn";
+import { compressImageToDataUrl, fileToDataUrl } from "./lib/image";
 import { isCloudConfigured, subscribeCloudChanges } from "./services/cloudClient";
 import {
   getCurrentDataMode,
@@ -90,6 +91,7 @@ function App() {
   const [compactMode, setCompactMode] = useState(false);
   const [dataMode, setDataMode] = useState<DataMode>(() => getCurrentDataMode());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isProcessingImage, setIsProcessingImage] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -127,7 +129,7 @@ function App() {
 
   // 创建笔记（乐观更新）
   const createMemo = async () => {
-    if (!newMemoContent.trim()) return;
+    if (!newMemoContent.trim() || isProcessingImage) return;
     const tempId = -Date.now();
     const ts = Math.floor(Date.now() / 1000);
     const tempMemo: Memo = {
@@ -230,6 +232,25 @@ function App() {
     }
   };
 
+  const appendImageToMemo = async (file: Blob, displayName = "图片") => {
+    setIsProcessingImage(true);
+    try {
+      const compressed = await compressImageToDataUrl(file);
+      setNewMemoContent((prev) => prev + `\n![${displayName}](${compressed})\n`);
+    } catch (error) {
+      console.warn("图片压缩失败，回退为原图:", error);
+      try {
+        const original = await fileToDataUrl(file);
+        setNewMemoContent((prev) => prev + `\n![${displayName}](${original})\n`);
+      } catch (fallbackError) {
+        console.error("图片读取失败:", fallbackError);
+        alert("图片处理失败，请重试");
+      }
+    } finally {
+      setIsProcessingImage(false);
+    }
+  };
+
   // 处理粘贴事件 (支持粘贴图片)
   const handlePaste = async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -240,12 +261,7 @@ function App() {
         e.preventDefault();
         const blob = item.getAsFile();
         if (blob) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = reader.result as string;
-            setNewMemoContent((prev) => prev + `\n![图片](${base64})\n`);
-          };
-          reader.readAsDataURL(blob);
+          await appendImageToMemo(blob, "截图");
         }
         break;
       }
@@ -253,21 +269,17 @@ function App() {
   };
 
   // 处理文件选择
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const file = files[0];
     if (file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        setNewMemoContent((prev) => prev + `\n![${file.name}](${base64})\n`);
-      };
-      reader.readAsDataURL(file);
+      await appendImageToMemo(file, file.name);
     } else {
       setNewMemoContent((prev) => prev + `\n📎 附件: ${file.name}\n`);
     }
+    e.target.value = "";
   };
 
   useEffect(() => {
@@ -751,6 +763,7 @@ function App() {
               onFileSelect={handleFileSelect}
               fileInputRef={fileInputRef}
               textareaRef={textareaRef}
+              isProcessingImage={isProcessingImage}
             />
 
             {viewMode === "day" && filteredMemos.length > 0 && (

@@ -1,4 +1,4 @@
-import { Plus, Image, Paperclip, Send } from "lucide-react";
+import { Plus, Image, Paperclip, Send, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/Badge";
@@ -26,6 +26,7 @@ interface MemoEditorProps {
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  isProcessingImage: boolean;
 }
 
 export function MemoEditor({
@@ -38,9 +39,11 @@ export function MemoEditor({
   onFileSelect,
   fileInputRef,
   textareaRef,
+  isProcessingImage,
 }: MemoEditorProps) {
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
+  const canSubmit = Boolean(newMemoContent.trim()) && !isProcessingImage;
 
   return (
     <div className="p-4 lg:p-5">
@@ -119,10 +122,12 @@ export function MemoEditor({
               <div className="flex items-center gap-1 relative">
                 <button
                   onClick={() => setAttachmentMenuOpen(!attachmentMenuOpen)}
+                  disabled={isProcessingImage}
                   className={cn(
                     "p-2 rounded-lg transition-colors",
                     "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200",
-                    "hover:bg-slate-100 dark:hover:bg-slate-800"
+                    "hover:bg-slate-100 dark:hover:bg-slate-800",
+                    isProcessingImage && "opacity-50 cursor-not-allowed"
                   )}
                   title="添加附件"
                 >
@@ -162,15 +167,21 @@ export function MemoEditor({
 
               {/* 右侧发送按钮 */}
               <div className="flex items-center gap-3">
+                {isProcessingImage && (
+                  <span className="text-xs font-medium text-amber-600 dark:text-amber-400 inline-flex items-center gap-1.5">
+                    <Loader2 size={12} className="animate-spin" />
+                    图片处理中...
+                  </span>
+                )}
                 <span className="text-xs font-medium text-slate-300 dark:text-slate-600 hidden sm:inline-block">
                   ⌘ + Enter
                 </span>
                 <button
                   onClick={onCreateMemo}
-                  disabled={!newMemoContent.trim()}
+                  disabled={!canSubmit}
                   className={cn(
                     "flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200",
-                    newMemoContent.trim()
+                    canSubmit
                       ? "bg-gradient-to-r from-indigo-500 to-indigo-600 text-white shadow-md shadow-indigo-500/30 hover:shadow-lg hover:-translate-y-0.5 active:scale-95"
                       : "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
                   )}
