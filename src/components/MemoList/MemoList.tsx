@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import type { JSX } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, NotebookPen } from "lucide-react";
+import { Empty, EmptyDescription, EmptyIcon, EmptyTitle } from "@/components/ui/Empty";
 
 // 分类定义
 const categories = [
@@ -329,10 +330,13 @@ export function MemoList({
         {viewMode === "year" && renderYearView()}
 
         {memos.length === 0 && viewMode === "day" && (
-          <div className="text-center py-12 flex flex-col items-center justify-center h-full">
-            <div className="text-6xl mb-4">📝</div>
-            <p className="text-gray-400">还没有笔记,开始记录吧!</p>
-          </div>
+          <Empty className="mt-2">
+            <EmptyIcon>
+              <NotebookPen size={20} />
+            </EmptyIcon>
+            <EmptyTitle>还没有笔记</EmptyTitle>
+            <EmptyDescription>从上方输入框记录第一条想法吧。</EmptyDescription>
+          </Empty>
         )}
       </div>
     </div>

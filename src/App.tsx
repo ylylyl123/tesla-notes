@@ -12,6 +12,11 @@ import {
   BarChart2,
   Bookmark,
   Settings as SettingsIcon,
+  Search,
+  Cloud,
+  CloudOff,
+  CheckCircle2,
+  RefreshCw,
 } from "lucide-react";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
@@ -22,6 +27,10 @@ import { MemoEditor } from "./components/Editor/MemoEditor";
 import ThemeToggle from "./components/Common/ThemeToggle";
 import { cn } from "./lib/cn";
 import { compressImageToDataUrl, fileToDataUrl } from "./lib/image";
+import { Empty, EmptyDescription, EmptyIcon, EmptyTitle } from "./components/ui/Empty";
+import { Skeleton } from "./components/ui/Skeleton";
+import { Toaster } from "./components/ui/Sonner";
+import { CommandPalette, type CommandPaletteItem } from "./components/ui/CommandPalette";
 import { isCloudConfigured, subscribeCloudChanges } from "./services/cloudClient";
 import {
   getCurrentDataMode,
@@ -29,6 +38,7 @@ import {
   setPreferredDataMode,
   type DataMode,
 } from "./services/dataClient";
+import { toast } from "sonner";
 
 dayjs.locale("zh-cn");
 dayjs.extend(weekOfYear);
@@ -74,6 +84,18 @@ const categories = [
 type ViewMode = "day" | "week" | "month" | "year";
 type Tab = "home" | "stats" | "archive" | "settings";
 
+interface PendingDeletion {
+  memo: Memo;
+  index: number;
+  timer: number;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  return "未知错误";
+}
+
 function App() {
   const [memos, setMemos] = useState<Memo[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -92,8 +114,52 @@ function App() {
   const [dataMode, setDataMode] = useState<DataMode>(() => getCurrentDataMode());
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [isCommandOpen, setIsCommandOpen] = useState(false);
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const hasLoadedOnceRef = useRef(false);
+  const pendingDeletionRef = useRef<Map<number, PendingDeletion>>(new Map());
+  const isTauriRuntime =
+    typeof window !== "undefined" &&
+    Boolean(
+      (window as Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown }).__TAURI__ ||
+      (window as Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
+    );
+  const effectiveDataMode: "local" | "cloud" = dataMode === "auto"
+    ? (isTauriRuntime ? "local" : "cloud")
+    : dataMode;
+
+  const beginSync = () => {
+    if (effectiveDataMode !== "cloud") return;
+    setPendingSyncCount((prev) => prev + 1);
+    setLastSyncError(null);
+  };
+
+  const endSync = (error?: unknown) => {
+    if (effectiveDataMode !== "cloud") return;
+    setPendingSyncCount((prev) => Math.max(0, prev - 1));
+    if (error) {
+      setLastSyncError(getErrorMessage(error));
+      return;
+    }
+    setLastSyncedAt(Date.now());
+  };
+
+  const withSync = async <T,>(task: () => Promise<T>): Promise<T> => {
+    beginSync();
+    try {
+      const result = await task();
+      endSync();
+      return result;
+    } catch (error) {
+      endSync(error);
+      throw error;
+    }
+  };
 
   // 自动根据日期切换分类
   useEffect(() => {
@@ -107,24 +173,58 @@ function App() {
     }
   }, [selectedDate]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsCommandOpen((prev) => !prev);
+        return;
+      }
+      if (event.key === "Escape") {
+        setIsCommandOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      for (const pending of pendingDeletionRef.current.values()) {
+        window.clearTimeout(pending.timer);
+      }
+      pendingDeletionRef.current.clear();
+    };
+  }, []);
+
   // 加载笔记
   const loadMemos = async () => {
     try {
-      const result = await getDataClient().getMemos({ limit: 100, offset: 0 });
-      setMemos(result);
+      const result = await withSync(() => getDataClient().getMemos({ limit: 100, offset: 0 }));
+      const pendingIds = new Set(pendingDeletionRef.current.keys());
+      const visible = result.filter((memo) => !pendingIds.has(memo.id));
+      setMemos(visible);
+      return visible;
     } catch (error) {
       console.error("加载笔记失败:", error);
+      throw error;
     }
   };
 
   // 加载计划
   const loadPlans = async (date: string) => {
     try {
-      const result = await getDataClient().getPlansByDate(date);
+      const result = await withSync(() => getDataClient().getPlansByDate(date));
       setPlans(result);
+      return result;
     } catch (error) {
       console.error("加载计划失败:", error);
+      throw error;
     }
+  };
+
+  const refreshData = async () => {
+    await Promise.all([loadMemos(), loadPlans(selectedDate.format("YYYY-MM-DD"))]);
   };
 
   // 创建笔记（乐观更新）
@@ -148,33 +248,65 @@ function App() {
     setMemos((prev) => [tempMemo, ...prev]);
     setNewMemoContent("");
     try {
-      const created = await getDataClient().createMemo({
+      const created = await withSync(() => getDataClient().createMemo({
         content: tempMemo.content,
         category: selectedCategory,
         targetDate: selectedDate.format("YYYY-MM-DD"),
-      });
+      }));
       // 用真实数据替换临时数据
       setMemos((prev) => prev.map((m) => (m.id === tempId ? created : m)));
     } catch (error) {
       // 失败回滚
       setMemos((prev) => prev.filter((m) => m.id !== tempId));
       console.error("创建笔记失败:", error);
+      toast.error("创建笔记失败，请稍后重试");
     }
   };
 
   // 删除笔记（乐观更新）
   const deleteMemo = async (id: number) => {
-    const backup = memos;
-    // 立即从 UI 中移除
+    const index = memos.findIndex((m) => m.id === id);
+    if (index < 0) return;
+    const memo = memos[index];
+
+    // 先做乐观删除，给用户撤销窗口
     setMemos((prev) => prev.filter((m) => m.id !== id));
-    try {
-      await getDataClient().deleteMemo(id);
-    } catch (error) {
-      // 失败回滚
-      setMemos(backup);
-      console.error("删除失败:", error);
-      alert("删除失败: " + error);
-    }
+    const timer = window.setTimeout(async () => {
+      try {
+        await withSync(() => getDataClient().deleteMemo(id));
+      } catch (error) {
+        console.error("删除失败:", error);
+        setMemos((prev) => {
+          if (prev.some((m) => m.id === id)) return prev;
+          const copy = [...prev];
+          copy.splice(Math.min(index, copy.length), 0, memo);
+          return copy;
+        });
+        toast.error("删除失败，已恢复笔记");
+      } finally {
+        pendingDeletionRef.current.delete(id);
+      }
+    }, 3500);
+
+    pendingDeletionRef.current.set(id, { memo, index, timer });
+    toast("笔记已删除", {
+      action: {
+        label: "撤销",
+        onClick: () => {
+          const pending = pendingDeletionRef.current.get(id);
+          if (!pending) return;
+          window.clearTimeout(pending.timer);
+          pendingDeletionRef.current.delete(id);
+          setMemos((prev) => {
+            if (prev.some((m) => m.id === id)) return prev;
+            const copy = [...prev];
+            copy.splice(Math.min(pending.index, copy.length), 0, pending.memo);
+            return copy;
+          });
+          toast.success("已撤销删除");
+        },
+      },
+    });
   };
 
   // 更新笔记（乐观更新）
@@ -188,11 +320,12 @@ function App() {
     );
     setEditingMemoId(null);
     try {
-      await getDataClient().updateMemo({ id, content: editContent });
+      await withSync(() => getDataClient().updateMemo({ id, content: editContent }));
     } catch (error) {
       // 失败回滚
       setMemos(backup);
       console.error("更新失败:", error);
+      toast.error("更新失败，请稍后重试");
     }
   };
 
@@ -208,7 +341,7 @@ function App() {
       )
     );
     try {
-      await getDataClient().toggleMemoStatus(id);
+      await withSync(() => getDataClient().toggleMemoStatus(id));
     } catch (error) {
       setMemos(backup);
       console.error("切换状态失败:", error);
@@ -225,7 +358,7 @@ function App() {
       )
     );
     try {
-      await getDataClient().updateMemo({ id, pinned: !currentPinned });
+      await withSync(() => getDataClient().updateMemo({ id, pinned: !currentPinned }));
     } catch (error) {
       setMemos(backup);
       console.error("切换置顶失败:", error);
@@ -244,7 +377,7 @@ function App() {
         setNewMemoContent((prev) => prev + `\n![${displayName}](${original})\n`);
       } catch (fallbackError) {
         console.error("图片读取失败:", fallbackError);
-        alert("图片处理失败，请重试");
+        toast.error("图片处理失败，请重试");
       }
     } finally {
       setIsProcessingImage(false);
@@ -283,18 +416,39 @@ function App() {
   };
 
   useEffect(() => {
-    loadMemos();
-    loadPlans(selectedDate.format("YYYY-MM-DD"));
+    let cancelled = false;
+    const run = async () => {
+      const shouldShowLoader = !hasLoadedOnceRef.current;
+      if (shouldShowLoader) {
+        setIsInitialLoading(true);
+      }
+      try {
+        await refreshData();
+      } catch (error) {
+        console.error("数据加载失败:", error);
+        toast.error("数据加载失败，请检查网络");
+      } finally {
+        if (!cancelled && shouldShowLoader) {
+          setIsInitialLoading(false);
+          hasLoadedOnceRef.current = true;
+        }
+      }
+    };
+    run();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedDate]);
 
   // 自动刷新: 本地模式轮询 + 聚焦刷新
   useEffect(() => {
     const refresh = () => {
-      loadMemos();
-      loadPlans(selectedDate.format("YYYY-MM-DD"));
+      refreshData().catch((error) => {
+        console.error("自动刷新失败:", error);
+      });
     };
 
-    const shouldPoll = dataMode !== "cloud";
+    const shouldPoll = effectiveDataMode !== "cloud";
     const timer = shouldPoll ? window.setInterval(refresh, 15000) : null;
     window.addEventListener("focus", refresh);
 
@@ -302,23 +456,26 @@ function App() {
       if (timer) window.clearInterval(timer);
       window.removeEventListener("focus", refresh);
     };
-  }, [selectedDate, dataMode]);
+  }, [selectedDate, effectiveDataMode]);
 
   // 云端模式: 使用 Supabase Realtime, 新增/编辑几乎实时同步
   useEffect(() => {
-    if (dataMode !== "cloud" || !isCloudConfigured()) return;
+    if (effectiveDataMode !== "cloud" || !isCloudConfigured()) return;
 
     const unsubscribe = subscribeCloudChanges(() => {
-      loadMemos();
-      loadPlans(selectedDate.format("YYYY-MM-DD"));
+      refreshData().catch((error) => {
+        console.error("实时同步刷新失败:", error);
+      });
     });
 
     return () => unsubscribe();
-  }, [selectedDate, dataMode]);
+  }, [selectedDate, effectiveDataMode]);
 
   const switchDataMode = (mode: DataMode) => {
     setPreferredDataMode(mode);
     setDataMode(mode);
+    setPendingSyncCount(0);
+    setLastSyncError(null);
     window.location.reload();
   };
 
@@ -332,6 +489,125 @@ function App() {
       { id: "archive", icon: Bookmark, label: "置顶" },
       { id: "settings", icon: SettingsIcon, label: "设置" },
     ];
+
+  const renderSyncBadge = () => {
+    if (effectiveDataMode !== "cloud") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
+          <CloudOff size={11} />
+          本地模式
+        </span>
+      );
+    }
+
+    if (lastSyncError) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-[11px] text-rose-600 dark:bg-rose-900/30 dark:text-rose-300">
+          <Cloud size={11} />
+          同步异常
+        </span>
+      );
+    }
+
+    if (pendingSyncCount > 0) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+          <RefreshCw size={11} className="animate-spin" />
+          同步中
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+        <CheckCircle2 size={11} />
+        {lastSyncedAt ? `已同步 ${dayjs(lastSyncedAt).format("HH:mm:ss")}` : "已连接云端"}
+      </span>
+    );
+  };
+
+  const commandItems: CommandPaletteItem[] = [
+      {
+        id: "new-memo",
+        label: "新建笔记（发送当前输入）",
+        keywords: ["新建", "创建", "发送", "memo"],
+        hint: "⌘+Enter",
+        onSelect: () => {
+          if (!newMemoContent.trim()) {
+            textareaRef.current?.focus();
+            toast.message("请先输入内容");
+            return;
+          }
+          void createMemo();
+        },
+      },
+      {
+        id: "go-today",
+        label: "跳转到今天",
+        keywords: ["today", "日期", "今天", "日视图"],
+        onSelect: () => {
+          setActiveTab("home");
+          setSelectedDate(dayjs());
+          setViewMode("day");
+          setShowDateFilter(true);
+        },
+      },
+      {
+        id: "toggle-compact",
+        label: compactMode ? "关闭紧凑视图" : "打开紧凑视图",
+        keywords: ["紧凑", "列表", "视图"],
+        onSelect: () => setCompactMode((prev) => !prev),
+      },
+      {
+        id: "tab-stats",
+        label: "打开统计页",
+        keywords: ["统计", "图表", "stats"],
+        onSelect: () => setActiveTab("stats"),
+      },
+      {
+        id: "tab-archive",
+        label: "打开置顶页",
+        keywords: ["置顶", "归档", "archive"],
+        onSelect: () => setActiveTab("archive"),
+      },
+      {
+        id: "tab-settings",
+        label: "打开设置页",
+        keywords: ["设置", "config", "settings"],
+        onSelect: () => setActiveTab("settings"),
+      },
+      {
+        id: "mode-cloud",
+        label: "切换为云同步模式",
+        keywords: ["云", "cloud", "同步"],
+        onSelect: () => switchDataMode("cloud"),
+      },
+      {
+        id: "mode-local",
+        label: "切换为本地模式",
+        keywords: ["本地", "local", "离线"],
+        onSelect: () => switchDataMode("local"),
+      },
+      {
+        id: "mode-auto",
+        label: "切换为自动模式",
+        keywords: ["auto", "自动"],
+        onSelect: () => switchDataMode("auto"),
+      },
+    ];
+
+  const categoryCommands = categories.map<CommandPaletteItem>((cat) => ({
+      id: `category-${cat.id}`,
+      label: `切换分类：${cat.name}`,
+      keywords: ["分类", cat.name, cat.id],
+      onSelect: () => {
+        setActiveTab("home");
+        setSelectedCategory(cat.id);
+        textareaRef.current?.focus();
+      },
+    }));
+
+  commandItems.push(...categoryCommands);
 
   // 根据视图模式过滤笔记
   const getFilteredMemos = () => {
@@ -598,13 +874,36 @@ function App() {
       <div className="max-w-2xl mx-auto space-y-6">
         <h2 className="text-xl font-semibold">📌 置顶笔记</h2>
         {archivedMemos.length === 0 ? (
-          <div className="text-center py-12 text-gray-400">暂无置顶笔记</div>
+          <Empty>
+            <EmptyIcon>📌</EmptyIcon>
+            <EmptyTitle>暂无置顶笔记</EmptyTitle>
+            <EmptyDescription>你可以在笔记卡片右上角将重要内容置顶。</EmptyDescription>
+          </Empty>
         ) : (
           <div className="space-y-3">{archivedMemos.map(renderMemoCard)}</div>
         )}
       </div>
     );
   };
+
+  const renderHomeSkeleton = () => (
+    <div className="flex-1 overflow-auto p-4 space-y-3">
+      {Array.from({ length: 4 }).map((_, idx) => (
+        <div
+          key={idx}
+          className="rounded-2xl border border-slate-200/60 bg-white/80 p-4 shadow-sm dark:border-slate-700/60 dark:bg-slate-900/70"
+        >
+          <div className="flex items-center justify-between mb-3">
+            <Skeleton className="h-3 w-14" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-4 w-full mb-2" />
+          <Skeleton className="h-4 w-4/5 mb-2" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      ))}
+    </div>
+  );
 
   // 渲染设置页面
   const renderSettingsTab = () => (
@@ -626,6 +925,10 @@ function App() {
           <div className="flex items-center justify-between">
             <span className="text-gray-700">同步模式</span>
             <span className="text-sm text-gray-500">{dataMode}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-gray-700">同步状态</span>
+            {renderSyncBadge()}
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -677,7 +980,7 @@ function App() {
   );
 
   return (
-    <div className="h-screen flex bg-gray-50 overflow-hidden">
+    <div className="h-screen flex overflow-hidden bg-[var(--color-background)] text-[var(--color-foreground)]">
       {/* 桌面侧边栏 */}
       <div className="hidden md:flex">
         <Sidebar
@@ -747,8 +1050,34 @@ function App() {
               <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Zac卓越之道</div>
               <div className="text-xs text-slate-500">{selectedDate.format("YYYY年M月D日")}</div>
             </div>
-            <ThemeToggle />
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setIsCommandOpen(true)}
+                className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="打开命令面板"
+                title="命令面板"
+              >
+                <Search size={16} />
+              </button>
+              <ThemeToggle />
+            </div>
           </div>
+          <div className="mt-2 flex justify-center">
+            {renderSyncBadge()}
+          </div>
+        </div>
+
+        <div className="hidden md:flex items-center justify-end gap-2 px-4 pt-3">
+          {renderSyncBadge()}
+          <button
+            onClick={() => setIsCommandOpen(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+            title="命令面板"
+          >
+            <Search size={13} />
+            <span>命令面板</span>
+            <span className="text-[10px] text-slate-400">⌘K</span>
+          </button>
         </div>
 
         {activeTab === "home" ? (
@@ -766,29 +1095,35 @@ function App() {
               isProcessingImage={isProcessingImage}
             />
 
-            {viewMode === "day" && filteredMemos.length > 0 && (
-              <div className="hidden md:flex justify-end px-4 pb-2">
-                <button
-                  onClick={() => setCompactMode(!compactMode)}
-                  className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                  title={compactMode ? "切换到默认视图" : "切换到紧凑视图"}
-                >
-                  {compactMode ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
-                  <span>{compactMode ? "默认视图" : "紧凑视图"}</span>
-                </button>
-              </div>
-            )}
+            {isInitialLoading ? (
+              renderHomeSkeleton()
+            ) : (
+              <>
+                {viewMode === "day" && filteredMemos.length > 0 && (
+                  <div className="hidden md:flex justify-end px-4 pb-2">
+                    <button
+                      onClick={() => setCompactMode(!compactMode)}
+                      className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                      title={compactMode ? "切换到默认视图" : "切换到紧凑视图"}
+                    >
+                      {compactMode ? <Maximize2 size={16} /> : <Minimize2 size={16} />}
+                      <span>{compactMode ? "默认视图" : "紧凑视图"}</span>
+                    </button>
+                  </div>
+                )}
 
-            <MemoList
-              memos={filteredMemos}
-              selectedDate={selectedDate}
-              viewMode={viewMode}
-              setViewMode={setViewMode}
-              setSelectedDate={setSelectedDate}
-              setShowDateFilter={setShowDateFilter}
-              renderMemoCard={renderMemoCard}
-              compactMode={compactMode}
-            />
+                <MemoList
+                  memos={filteredMemos}
+                  selectedDate={selectedDate}
+                  viewMode={viewMode}
+                  setViewMode={setViewMode}
+                  setSelectedDate={setSelectedDate}
+                  setShowDateFilter={setShowDateFilter}
+                  renderMemoCard={renderMemoCard}
+                  compactMode={compactMode}
+                />
+              </>
+            )}
           </>
         ) : activeTab === "stats" ? (
           <div className="flex-1 overflow-auto p-4">{renderStatsTab()}</div>
@@ -819,6 +1154,8 @@ function App() {
           ))}
         </div>
       </div>
+      <CommandPalette open={isCommandOpen} onOpenChange={setIsCommandOpen} items={commandItems} />
+      <Toaster />
     </div>
   );
 }

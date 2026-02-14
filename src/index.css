@@ -99,6 +99,25 @@
   --status-incomplete-text: #dc2626;
   --status-pending-bg: #f1f5f9;
   --status-pending-text: #64748b;
+
+  /* shadcn-style token alias (便于组件统一迁移) */
+  --background: var(--color-background);
+  --foreground: var(--color-foreground);
+  --card: var(--color-card);
+  --card-foreground: var(--color-card-foreground);
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-primary-foreground);
+  --secondary: var(--color-secondary);
+  --secondary-foreground: var(--color-secondary-foreground);
+  --muted: var(--color-muted);
+  --muted-foreground: var(--color-muted-foreground);
+  --accent: var(--color-accent);
+  --accent-foreground: var(--color-accent-foreground);
+  --border: var(--color-border);
+  --input: var(--color-input);
+  --ring: var(--color-ring);
+  --destructive: var(--color-destructive);
+  --destructive-foreground: var(--color-destructive-foreground);
 }
 
 /* ==================== 暗黑模式 ==================== */
@@ -129,6 +148,25 @@
 
   --shadow-float: 0 8px 30px -12px rgb(129 140 248 / 0.3);
   --shadow-hover: 0 12px 40px -12px rgb(129 140 248 / 0.4);
+
+  /* shadcn-style token alias (dark) */
+  --background: var(--color-background);
+  --foreground: var(--color-foreground);
+  --card: var(--color-card);
+  --card-foreground: var(--color-card-foreground);
+  --primary: var(--color-primary);
+  --primary-foreground: var(--color-primary-foreground);
+  --secondary: var(--color-secondary);
+  --secondary-foreground: var(--color-secondary-foreground);
+  --muted: var(--color-muted);
+  --muted-foreground: var(--color-muted-foreground);
+  --accent: var(--color-accent);
+  --accent-foreground: var(--color-accent-foreground);
+  --border: var(--color-border);
+  --input: var(--color-input);
+  --ring: var(--color-ring);
+  --destructive: var(--color-destructive);
+  --destructive-foreground: var(--color-destructive-foreground);
 }
 
 /* ==================== 基础样式 ==================== */
